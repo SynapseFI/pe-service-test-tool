@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +28,8 @@ var errsMap = map[int]string{
 	ErrNoSuchHost:         "no such host",
 	ErrBrokenPipe:         "broken pipe",
 }
+
+var client *http.Client
 
 func main() {
 	var concurrency int
@@ -51,6 +55,19 @@ func main() {
 
 	url := flag.Arg(0)
 
+	// Customize the Transport to have larger connection pool
+	defaultRoundTripper := http.DefaultTransport
+	defaultTransportPointer, ok := defaultRoundTripper.(*http.Transport)
+	if !ok {
+		panic(fmt.Sprintf("defaultRoundTripper not an *http.Transport"))
+	}
+	// Dereference it to get a copy of the struct that the pointer points to
+	defaultTransport := *defaultTransportPointer
+	defaultTransport.MaxIdleConns = overallRequests
+	defaultTransport.MaxIdleConnsPerHost = overallRequests
+
+	client = &http.Client{Transport: &defaultTransport}
+
 	resultsCh := make(chan int)
 	httpErrCh := make(chan int)
 
@@ -60,7 +77,12 @@ func main() {
 		next <- true
 	}
 
-	for i := 0; i < concurrency; i++ {
+	actualConcurrency := concurrency
+	if overallRequests < concurrency {
+		actualConcurrency = overallRequests
+	}
+
+	for i := 0; i < actualConcurrency; i++ {
 		go run(url, resultsCh, httpErrCh, next)
 	}
 
@@ -134,7 +156,9 @@ func run(url string, resultsCh, httpErrCh chan<- int, next <-chan bool) {
 OUTER:
 	for {
 		<-next
-		res, err := http.Get(url)
+		res, err := client.Get(url)
+		io.Copy(ioutil.Discard, res.Body)
+		res.Body.Close()
 		if err != nil {
 			for k, v := range errsMap {
 				if strings.Contains(err.Error(), v) {
@@ -148,12 +172,10 @@ OUTER:
 			continue
 		}
 		if res.StatusCode != 200 {
-			res.Body.Close()
 			resultsCh <- ErrHttp
 			httpErrCh <- res.StatusCode
 			continue
 		}
-		res.Body.Close()
 		resultsCh <- NoError
 	}
 }
