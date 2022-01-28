@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -55,6 +57,11 @@ func main() {
 
 	url := flag.Arg(0)
 
+	actualConcurrency := concurrency
+	if overallRequests < concurrency {
+		actualConcurrency = overallRequests
+	}
+
 	// Customize the Transport to have larger connection pool
 	defaultRoundTripper := http.DefaultTransport
 	defaultTransportPointer, ok := defaultRoundTripper.(*http.Transport)
@@ -63,24 +70,22 @@ func main() {
 	}
 	// Dereference it to get a copy of the struct that the pointer points to
 	defaultTransport := *defaultTransportPointer
-	defaultTransport.MaxIdleConns = overallRequests
-	defaultTransport.MaxIdleConnsPerHost = overallRequests
+	defaultTransport.MaxIdleConns = actualConcurrency + 10
+	defaultTransport.MaxIdleConnsPerHost = actualConcurrency + 10
 
 	client = &http.Client{Transport: &defaultTransport}
 
 	resultsCh := make(chan int)
 	httpErrCh := make(chan int)
+	sigs := make(chan os.Signal, 1)
 
 	// Prevents requests beyond the overall number
-	next := make(chan bool, overallRequests)
-	for i := 0; i < overallRequests; i++ {
-		next <- true
-	}
-
-	actualConcurrency := concurrency
-	if overallRequests < concurrency {
-		actualConcurrency = overallRequests
-	}
+	next := make(chan bool)
+	go func() {
+		for i := 0; i < overallRequests; i++ {
+			next <- true
+		}
+	}()
 
 	for i := 0; i < actualConcurrency; i++ {
 		go run(url, resultsCh, httpErrCh, next)
@@ -104,23 +109,31 @@ func main() {
 	errs := map[int]int{}
 	httpErrs := map[int]int{}
 
-	for success+fail < overallRequests {
-		res := <-resultsCh
-		if res == NoError {
-			success++
-		} else {
-			fail++
-			if v, ok := errs[res]; ok {
-				errs[res] = v + 1
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	keepGoing := true
+	for success+fail < overallRequests && keepGoing {
+		var res int
+		select {
+		case <-sigs:
+			keepGoing = false
+		case res = <-resultsCh:
+			if res == NoError {
+				success++
 			} else {
-				errs[res] = 1
-			}
-			if res == ErrHttp {
-				statusCode := <-httpErrCh
-				if v, ok := httpErrs[statusCode]; ok {
-					httpErrs[statusCode] = v + 1
+				fail++
+				if v, ok := errs[res]; ok {
+					errs[res] = v + 1
 				} else {
-					httpErrs[statusCode] = 1
+					errs[res] = 1
+				}
+				if res == ErrHttp {
+					statusCode := <-httpErrCh
+					if v, ok := httpErrs[statusCode]; ok {
+						httpErrs[statusCode] = v + 1
+					} else {
+						httpErrs[statusCode] = 1
+					}
 				}
 			}
 		}
@@ -157,8 +170,10 @@ OUTER:
 	for {
 		<-next
 		res, err := client.Get(url)
-		io.Copy(ioutil.Discard, res.Body)
-		res.Body.Close()
+		if res != nil && res.Body != nil {
+			io.Copy(ioutil.Discard, res.Body)
+			res.Body.Close()
+		}
 		if err != nil {
 			for k, v := range errsMap {
 				if strings.Contains(err.Error(), v) {
