@@ -20,6 +20,7 @@ const (
 	ErrHttp
 	ErrTooManyFiles
 	ErrConnectionRejected
+	ErrConnectionRefused
 	ErrNoSuchHost
 	ErrBrokenPipe
 )
@@ -27,6 +28,7 @@ const (
 var errsMap = map[int]string{
 	ErrTooManyFiles:       "too many open files",
 	ErrConnectionRejected: "connection reset by peer",
+	ErrConnectionRefused:  "connection refused",
 	ErrNoSuchHost:         "no such host",
 	ErrBrokenPipe:         "broken pipe",
 }
