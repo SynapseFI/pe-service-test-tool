@@ -23,6 +23,8 @@ const (
 	ErrConnectionRefused
 	ErrNoSuchHost
 	ErrBrokenPipe
+	ErrEOF
+	ErrIoTimeout
 )
 
 var errsMap = map[int]string{
@@ -31,6 +33,8 @@ var errsMap = map[int]string{
 	ErrConnectionRefused:  "connection refused",
 	ErrNoSuchHost:         "no such host",
 	ErrBrokenPipe:         "broken pipe",
+	ErrEOF:                "EOF",
+	ErrIoTimeout:          "i/o timeout",
 }
 
 var client *http.Client
