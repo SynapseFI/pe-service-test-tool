@@ -168,7 +168,6 @@ func main() {
 }
 
 func run(url string, resultsCh, httpErrCh chan<- int, next <-chan bool) {
-OUTER:
 	for {
 		<-next
 		res, err := client.Get(url)
@@ -177,11 +176,9 @@ OUTER:
 			res.Body.Close()
 		}
 		if err != nil {
-			for k, v := range errsMap {
-				if strings.Contains(err.Error(), v) {
-					resultsCh <- k
-					continue OUTER
-				}
+			if code, ok := findErrCode(err.Error()); ok {
+				resultsCh <- code
+				continue
 			}
 			log.Println(err)
 
@@ -195,4 +192,15 @@ OUTER:
 		}
 		resultsCh <- NoError
 	}
+}
+
+// findErrCode returns the found error code and 'true' for 'ok' in case the error matched one of the patterns. Otherwise,
+// returns -1 and 'false' for 'ok'
+func findErrCode(errString string) (int, bool) {
+	for k, v := range errsMap {
+		if strings.Contains(errString, v) {
+			return k, true
+		}
+	}
+	return -1, false
 }
