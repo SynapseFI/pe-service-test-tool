@@ -69,17 +69,16 @@ func main() {
 	}
 
 	// Customize the Transport to have larger connection pool
-	defaultRoundTripper := http.DefaultTransport
-	defaultTransportPointer, ok := defaultRoundTripper.(*http.Transport)
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		panic(fmt.Sprintf("defaultRoundTripper not an *http.Transport"))
 	}
-	// Dereference it to get a copy of the struct that the pointer points to
-	defaultTransport := *defaultTransportPointer
+
 	defaultTransport.MaxIdleConns = actualConcurrency + 10
 	defaultTransport.MaxIdleConnsPerHost = actualConcurrency + 10
+	defaultTransport.ForceAttemptHTTP2 = true
 
-	client = &http.Client{Transport: &defaultTransport}
+	client = &http.Client{Transport: defaultTransport}
 
 	resultsCh := make(chan int)
 	httpErrCh := make(chan int)
